@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>WAY2REAL Staff Badge Scanner</title>
+  <script src="./jsQR.js"></script>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      padding: 20px;
+      font-family: Arial, Helvetica, sans-serif;
+      background: #071a35;
+      color: #eef3f9;
+      text-align: center;
+    }
+    .card {
+      max-width: 480px;
+      margin: 0 auto;
+      background: #102845;
+      border: 2px solid #f2cf3c;
+      border-radius: 14px;
+      padding: 22px;
+    }
+    h1 { margin: 0 0 6px; color: #f2cf3c; font-size: 1.4rem; }
+    p { margin: 0 0 16px; color: #b7c5d6; font-size: 0.95rem; }
+    video {
+      width: 100%;
+      border-radius: 10px;
+      background: #000;
+      display: none;
+      margin-top: 12px;
+      border: 2px solid #f2cf3c;
+    }
+    button.start-btn {
+      width: 100%;
+      padding: 15px;
+      font-size: 1.1rem;
+      font-weight: bold;
+      background: #f2cf3c;
+      color: #18233b;
+      border: none;
+      border-radius: 8px;
+      cursor: pointer;
+    }
+    #status {
+      margin-top: 16px;
+      padding: 14px;
+      border-radius: 8px;
+      font-size: 1rem;
+      font-weight: bold;
+      display: none;
+    }
+    .in { background: #14532d; color: #bbf7d0; border: 1px solid #4ade80; }
+    .out { background: #1e3a8a; color: #bfdbfe; border: 1px solid #38bdf8; }
+    .error { background: #7f1d1d; color: #fecaca; border: 1px solid #f87171; }
+    .manual {
+      margin-top: 20px;
+      padding-top: 16px;
+      border-top: 1px solid #29415f;
+      display: flex;
+      gap: 8px;
+    }
+    input {
+      flex: 1;
+      padding: 12px;
+      font-size: 1rem;
+      border-radius: 8px;
+      border: 1px solid #29415f;
+      background: #071a35;
+      color: #fff;
+    }
+    button.go-btn {
+      padding: 12px 18px;
+      font-size: 1rem;
+      font-weight: bold;
+      background: #f2cf3c;
+      color: #18233b;
+      border: none;
+      border-radius: 8px;
+      cursor: pointer;
+    }
+  </style>
+</head>
+<body>
+
+  <div class="card">
+    <h1>WAY2REAL Staff Scanner</h1>
+    <p>Hold staff badge QR code in front of the camera</p>
+
+    <button id="startBtn" class="start-btn" onclick="startCamera()">Tap to Start Camera</button>
+    <video id="video" playsinline muted></video>
+    <canvas id="scanCanvas" style="display:none;"></canvas>
+    <div id="status"></div>
+
+    <div class="manual">
+      <input type="text" id="manualId" placeholder="Or enter Staff ID..." onkeydown="if(event.key==='Enter') sendManual()">
+      <button class="go-btn" onclick="sendManual()">Go</button>
+    </div>
+  </div>
+
+  <script>
+    var EXEC_URL = 'https://script.google.com/macros/s/AKfycbzzOUFe31SoWg1XF-Ps1IZ6SaDl0YU-fSOMVQEHv6MTOjYEpwXGpKrZ4D4nVBE2IwqO/exec';
+
+    var video = document.getElementById('video');
+    var canvas = document.getElementById('scanCanvas');
+    var ctx = canvas.getContext('2d', { willReadFrequently: true });
+    var startBtn = document.getElementById('startBtn');
+    var statusBox = document.getElementById('status');
+    var isProcessing = false;
+
+    function showStatus(msg, type) {
+      statusBox.textContent = msg;
+      statusBox.className = type;
+      statusBox.style.display = 'block';
+    }
+
+    async function startCamera() {
+      if (typeof jsQR === 'undefined') {
+        showStatus('Missing jsQR.js in folder.', 'error');
+        return;
+      }
+
+      try {
+        var stream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: { ideal: 'environment' } },
+          audio: false
+        });
+        video.srcObject = stream;
+        await video.play();
+        video.style.display = 'block';
+        startBtn.style.display = 'none';
+        requestAnimationFrame(scanLoop);
+      } catch (err) {
+        showStatus('Camera error: ' + err.message, 'error');
+      }
+    }
+
+    function scanLoop() {
+      if (!isProcessing && video.readyState === video.HAVE_ENOUGH_DATA) {
+        canvas.width = video.videoWidth;
+        canvas.height = video.videoHeight;
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+        var imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+        var code = jsQR(imageData.data, imageData.width, imageData.height, {
+          inversionAttempts: 'dontInvert'
+        });
+
+        if (code && code.data) {
+          processBadge(code.data);
+        }
+      }
+      requestAnimationFrame(scanLoop);
+    }
+
+    function sendManual() {
+      var input = document.getElementById('manualId');
+      var val = input.value.trim();
+      if (val) {
+        input.value = '';
+        processBadge(val);
+      }
+    }
+
+    function processBadge(badgeId) {
+      if (isProcessing) return;
+      isProcessing = true;
+      showStatus('Logging badge ' + badgeId + '...', 'out');
+
+      fetch(EXEC_URL + '?scan=' + encodeURIComponent(badgeId))
+        .then(function(res) { return res.json(); })
+        .then(function(data) {
+          if (data.status === 'in') {
+            showStatus('Time In: Welcome, ' + data.name + ' (' + data.time + ')', 'in');
+          } else if (data.status === 'out') {
+            showStatus('Time Out: Goodbye, ' + data.name + ' (' + data.time + ')', 'out');
+          } else {
+            showStatus(data.message || 'Badge not found', 'error');
+          }
+          setTimeout(function() {
+            isProcessing = false;
+            statusBox.style.display = 'none';
+          }, 3000);
+        })
+        .catch(function(err) {
+          showStatus('Network error: ' + err.message, 'error');
+          setTimeout(function() { isProcessing = false; }, 3000);
+        });
+    }
+  </script>
+</body>
+</html>
